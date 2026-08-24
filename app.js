@@ -2,20 +2,14 @@
   "use strict";
   var C = window.SKYNAV;
   var EM = "\u2014";
-  var LAST_KEY = "skynav.last";
-  var HIST_KEY = "skynav.history";
-  var THEME_KEY = "skynav.theme";
 
   var state = {
-    path: null,
-    horizonLocked: false,
+    stream: null,
     imuReady: false,
     beta: null,
     gamma: null,
+    gps: null,
     shots: [],
-    stream: null,
-    last: null,
-    apSource: "none",
   };
 
   function $(id) { return document.getElementById(id); }
@@ -26,226 +20,71 @@
   }
   function fmt(n, d) {
     if (n == null || !isFinite(n)) return EM;
-    return Number(n).toFixed(d == null ? 3 : d);
+    return Number(n).toFixed(d == null ? 2 : d);
   }
-  function loadLast() {
-    try { return JSON.parse(localStorage.getItem(LAST_KEY) || "null"); } catch (e) { return null; }
+  function fmtLat(lat) {
+    if (lat == null || !isFinite(lat)) return EM;
+    return Math.abs(lat).toFixed(5) + "° " + (lat >= 0 ? "צפון" : "דרום");
   }
-  function loadHist() {
-    try { return JSON.parse(localStorage.getItem(HIST_KEY) || "[]"); } catch (e) { return []; }
-  }
-  function saveLast(r) {
-    localStorage.setItem(LAST_KEY, JSON.stringify(r));
-    var h = loadHist();
-    h.push(r);
-    localStorage.setItem(HIST_KEY, JSON.stringify(h));
-    refreshLastBtn();
-  }
-  function refreshLastBtn() {
-    var last = loadLast();
-    var btn = $("btnLast");
-    if (!last) {
-      btn.disabled = true;
-      btn.textContent = "Last result — " + EM;
-      return;
-    }
-    btn.disabled = false;
-    var t = last.utc ? last.utc.slice(11, 19) + "Z" : EM;
-    var ho = last.ho_deg != null ? fmt(last.ho_deg, 3) + "°" : EM;
-    btn.textContent = "Last result — " + t + " · Ho " + ho;
+  function fmtLon(lon) {
+    if (lon == null || !isFinite(lon)) return EM;
+    return Math.abs(lon).toFixed(5) + "° " + (lon >= 0 ? "מזרח" : "מערב");
   }
 
-  $("themeBtn").addEventListener("click", function () {
-    var sun = document.documentElement.getAttribute("data-theme") === "sun";
-    document.documentElement.setAttribute("data-theme", sun ? "" : "sun");
-    localStorage.setItem(THEME_KEY, sun ? "dark" : "sun");
-    $("themeBtn").textContent = sun ? "Sun mode" : "Dark mode";
-  });
-  if (localStorage.getItem(THEME_KEY) === "sun") {
-    document.documentElement.setAttribute("data-theme", "sun");
-    $("themeBtn").textContent = "Dark mode";
+  function getGPS() {
+    return new Promise(function (resolve) {
+      if (!navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          resolve({
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            acc: pos.coords.accuracy,
+          });
+        },
+        function () { resolve(null); },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+      );
+    });
   }
 
-  $("btnLast").addEventListener("click", function () {
-    var last = loadLast();
-    if (last) { state.last = last; renderResult(last); show("result"); }
-  });
-  $("btnCamera").addEventListener("click", function () { startCamera(); });
-  $("btnHs").addEventListener("click", function () { show("sight-hs"); $("hsStatus").textContent = ""; });
-  $("btnCamHome").addEventListener("click", function () { stopCamera(); show("home"); });
-  $("btnHsHome").addEventListener("click", function () { show("home"); });
-  $("btnDone").addEventListener("click", function () { stopCamera(); show("home"); refreshLastBtn(); });
-  $("btnNewSame").addEventListener("click", function () {
-    if (state.path === "sextant") show("sight-hs");
-    else startCamera();
-  });
-
-  $("btnHsGo").addEventListener("click", function () {
-    var deg = parseFloat($("hsDeg").value);
-    var min = parseFloat($("hsMin").value);
-    if (!isFinite(deg) || !isFinite(min) || min < 0 || min > 60) {
-      $("hsStatus").textContent = "failed — minutes must be 0–60; Hs required";
-      $("hsStatus").className = "status bad";
-      return;
-    }
-    var hs = C.dms(deg, min, 0);
-    finishSight({ path: "sextant", hs_deg: hs, utc: new Date().toISOString() });
-  });
-
-  function utcNow() { return new Date(); }
-
-  function finishSight(partial) {
-    var utc = new Date(partial.utc);
-    var sun = C.sunEquatorial(utc);
-    var he = parseFloat($("heM") ? $("heM").value : "3");
-    if (!isFinite(he) || he < 0) he = 3;
-    var ie = parseFloat($("ieMin") ? $("ieMin").value : "0") || 0;
-    var off = $("ieOff") ? $("ieOff").checked : false;
-    var limb = partial.path === "camera" ? "center" : "lower";
-    var corr = C.correctAltitude(partial.hs_deg, he, ie, off, limb, sun.sd_arcmin, sun.hp_arcmin);
-    var rec = {
-      path: partial.path,
-      utc: utc.toISOString(),
-      hs_deg: corr.hs_deg,
-      ho_deg: corr.ho_deg,
-      dip_arcmin: corr.dip_arcmin,
-      refraction_arcmin: corr.refraction_arcmin,
-      sd_arcmin: corr.sd_arcmin,
-      pa_arcmin: corr.pa_arcmin,
-      gha_deg: sun.gha_deg,
-      dec_deg: sun.dec_deg,
-      shots: partial.shots || null,
-      uncertainty: partial.path === "camera" ? "phone ~0.3–1°" : "sextant arc minutes",
-      ap_lat: null,
-      ap_lon: null,
-      ap_source: "none",
-      intercept_nm: null,
-      toward: null,
-      zn_deg: null,
-      running_lat: null,
-      running_lon: null,
-    };
-    applyAp(rec);
-    state.last = rec;
-    state.path = rec.path;
-    saveLast(rec);
-    stopCamera();
-    renderResult(rec);
-    show("result");
-  }
-
-  function applyAp(rec) {
-    var lat = parseFloat($("apLat").value);
-    var lon = parseFloat($("apLon").value);
-    if (isFinite(lat) && isFinite(lon)) {
-      rec.ap_lat = lat;
-      rec.ap_lon = lon;
-      if (rec.ap_source !== "gps") rec.ap_source = "typed";
-      var ic = C.intercept(rec.ho_deg, lat, lon, rec.gha_deg, rec.dec_deg);
-      rec.intercept_nm = ic.intercept_nm;
-      rec.toward = ic.toward;
-      rec.zn_deg = ic.zn_deg;
-      rec.hc_deg = ic.hc_deg;
-      var hist = loadHist().filter(function (x) { return x.ho_deg != null && x !== rec; });
-      var prev = hist.length ? hist[hist.length - 1] : null;
-      if (prev && prev.ap_lat != null && prev.zn_deg != null && rec.zn_deg != null) {
-        try {
-          var course = parseFloat($("crs").value) || 0;
-          var dist = parseFloat($("dist").value) || 0;
-          var a = {
-            lat_deg: prev.ap_lat,
-            lon_east_deg: prev.ap_lon,
-            zn_deg: prev.zn_deg,
-            intercept_nm: prev.intercept_nm,
-            toward: prev.toward,
-          };
-          var b = {
-            lat_deg: rec.ap_lat,
-            lon_east_deg: rec.ap_lon,
-            zn_deg: rec.zn_deg,
-            intercept_nm: rec.intercept_nm,
-            toward: rec.toward,
-          };
-          var fx = C.runningFix(a, b, course, dist);
-          rec.running_lat = fx[0];
-          rec.running_lon = fx[1];
-        } catch (e) {
-          rec.running_lat = null;
-          rec.running_lon = null;
-        }
+  function requestMotion() {
+    return new Promise(function (resolve) {
+      function onOrient(ev) {
+        if (ev.beta == null) return;
+        state.beta = ev.beta;
+        state.gamma = ev.gamma;
+        state.imuReady = true;
       }
-    } else {
-      rec.ap_source = rec.ap_source === "gps" ? "none" : rec.ap_source;
-      rec.intercept_nm = null;
-      rec.zn_deg = null;
-      rec.toward = null;
-      rec.running_lat = null;
-      rec.running_lon = null;
-    }
+      window.addEventListener("deviceorientation", onOrient, true);
+      window.addEventListener("deviceorientationabsolute", onOrient, true);
+      if (typeof DeviceMotionEvent !== "undefined" &&
+          typeof DeviceMotionEvent.requestPermission === "function") {
+        DeviceMotionEvent.requestPermission().catch(function () {});
+      }
+      if (typeof DeviceOrientationEvent !== "undefined" &&
+          typeof DeviceOrientationEvent.requestPermission === "function") {
+        DeviceOrientationEvent.requestPermission()
+          .then(function (r) { resolve(r === "granted"); })
+          .catch(function () { resolve(false); });
+      } else {
+        setTimeout(function () { resolve(state.imuReady); }, 500);
+      }
+    });
   }
 
-  function renderResult(rec) {
-    $("pathStamp").textContent = rec.path === "camera" ? "Camera+IMU" : "Sextant";
-    var inter = rec.intercept_nm == null ? EM : (fmt(rec.intercept_nm, 2) + " nmi " + (rec.toward ? "Toward" : "Away"));
-    var zn = rec.zn_deg == null ? EM : fmt(rec.zn_deg, 1) + "°";
-    var rf = rec.running_lat == null ? EM : fmt(rec.running_lat, 4) + ", " + fmt(rec.running_lon, 4);
-    var aps = rec.ap_source || "none";
-    var rows = [
-      ["UTC", rec.utc || EM],
-      ["Hs", fmt(rec.hs_deg, 4) + "°"],
-      ["Ho", fmt(rec.ho_deg, 4) + "°"],
-      ["Uncertainty", rec.uncertainty],
-      ["Intercept + Zn", rec.intercept_nm == null ? EM : inter + " · Zn " + zn],
-      ["Running fix", rf],
-      ["AP source", aps === "gps" ? "GPS (optional)" : aps === "typed" ? "typed" : "none"],
-      ["GHA / Dec", fmt(rec.gha_deg, 3) + "° / " + fmt(rec.dec_deg, 3) + "°"],
-    ];
-    $("resultRows").innerHTML = rows.map(function (r) {
-      return '<div class="row"><span class="k">' + r[0] + '</span><span class="v">' + r[1] + "</span></div>";
-    }).join("");
-    if (rec.ap_lat != null) { $("apLat").value = rec.ap_lat; $("apLon").value = rec.ap_lon; }
-  }
-
-  $("btnGps").addEventListener("click", function () {
-    if (!navigator.geolocation) {
-      $("apStatus").textContent = "GPS not available";
-      $("apStatus").className = "status bad";
-      return;
+  function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return Promise.resolve(false);
     }
-    $("apStatus").textContent = "Requesting GPS (AP only)…";
-    navigator.geolocation.getCurrentPosition(
-      function (pos) {
-        $("apLat").value = pos.coords.latitude.toFixed(5);
-        $("apLon").value = pos.coords.longitude.toFixed(5);
-        $("apStatus").textContent = "GPS (optional) stamped " + new Date().toISOString();
-        $("apStatus").className = "status ok";
-        if (state.last) {
-          state.last.ap_source = "gps";
-          applyAp(state.last);
-          saveLast(state.last);
-          renderResult(state.last);
-        }
-      },
-      function () {
-        $("apStatus").textContent = "GPS denied — type AP or leave " + EM;
-        $("apStatus").className = "status bad";
-      },
-      { enableHighAccuracy: true, timeout: 12000 }
-    );
-  });
-
-  $("btnRecompute").addEventListener("click", function () {
-    if (!state.last) return;
-    if (isFinite(parseFloat($("apLat").value))) state.last.ap_source = "typed";
-    applyAp(state.last);
-    saveLast(state.last);
-    renderResult(state.last);
-  });
-
-  /* ---------- camera + IMU ---------- */
-  function setCam(msg, kind) {
-    $("camStatus").textContent = msg;
-    $("camStatus").className = "status" + (kind ? " " + kind : "");
+    return navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then(function (stream) {
+        state.stream = stream;
+        $("video").srcObject = stream;
+        return true;
+      })
+      .catch(function () { return false; });
   }
 
   function stopCamera() {
@@ -253,186 +92,123 @@
       state.stream.getTracks().forEach(function (t) { t.stop(); });
       state.stream = null;
     }
-    state.horizonLocked = false;
-    state.shots = [];
-  }
-
-  function requestMotion() {
-    return new Promise(function (resolve) {
-      function onOrient(ev) {
-        if (ev.beta != null && ev.gamma != null) {
-          state.beta = ev.beta;
-          state.gamma = ev.gamma;
-          state.imuReady = true;
-        }
-      }
-      window.addEventListener("deviceorientation", onOrient, true);
-      if (typeof DeviceOrientationEvent !== "undefined" &&
-          typeof DeviceOrientationEvent.requestPermission === "function") {
-        DeviceOrientationEvent.requestPermission()
-          .then(function (r) {
-            state.imuReady = r === "granted";
-            resolve(state.imuReady);
-          })
-          .catch(function () { resolve(false); });
-      } else {
-        // Desktop / Android: wait briefly for an event
-        setTimeout(function () { resolve(state.imuReady); }, 400);
-      }
-    });
-  }
-
-  function startCamera() {
-    state.path = "camera";
-    state.horizonLocked = false;
-    state.shots = [];
-    state.imuReady = false;
-    $("btnHorizon").disabled = true;
-    $("btnShot").disabled = true;
-    $("btnFinishCam").disabled = true;
-    show("sight-cam");
-    setCam("Requesting camera and motion…");
-    var constraints = { video: { facingMode: { ideal: "environment" } }, audio: false };
-    navigator.mediaDevices
-      .getUserMedia(constraints)
-      .then(function (stream) {
-        state.stream = stream;
-        $("video").srcObject = stream;
-        return requestMotion();
-      })
-      .then(function (imu) {
-        if (!imu && !state.imuReady) {
-          setCam("IMU not ready — no number. Enable motion, hold the phone, retry.", "bad");
-          $("btnHorizon").disabled = true;
-          $("btnShot").disabled = true;
-          return;
-        }
-        $("btnHorizon").disabled = false;
-        setCam("Align the horizon, then lock. IMU ready.");
-        loopDetect();
-      })
-      .catch(function (err) {
-        setCam("failed — camera: " + (err && err.message ? err.message : "denied"), "bad");
-      });
-  }
-
-  $("btnHorizon").addEventListener("click", function () {
-    if (!state.imuReady) {
-      setCam("IMU not ready — no number.", "bad");
-      return;
-    }
-    state.horizonLocked = true;
-    $("btnShot").disabled = false;
-    setCam("Horizon locked. Point at the Sun and take several shots.", "ok");
-  });
-
-  $("btnShot").addEventListener("click", function () {
-    if (!state.horizonLocked) {
-      setCam("failed — no horizon lock", "bad");
-      return;
-    }
-    if (!state.imuReady || state.beta == null) {
-      setCam("IMU not ready — no number.", "bad");
-      return;
-    }
-    var blob = detectSun();
-    if (!blob) {
-      setCam("failed — no Sun in frame (bright compact blob required)", "bad");
-      return;
-    }
-    var hs = altitudeFromImu(state.beta, state.gamma, blob);
-    if (hs == null || !isFinite(hs)) {
-      setCam("failed — IMU not ready — no number", "bad");
-      return;
-    }
-    state.shots.push(hs);
-    $("btnFinishCam").disabled = state.shots.length < 1;
-    setCam("Shots OK: " + state.shots.length + " · last Hs " + fmt(hs, 3) + "°", "ok");
-  });
-
-  $("btnFinishCam").addEventListener("click", function () {
-    if (!state.shots.length) {
-      setCam("failed — no valid shots", "bad");
-      return;
-    }
-    var hs = C.trimmedMean(state.shots, 1);
-    finishSight({ path: "camera", hs_deg: hs, utc: new Date().toISOString(), shots: state.shots.slice() });
-  });
-
-  function altitudeFromImu(beta, gamma, blob) {
-    // iOS: beta = front-back tilt (−180..180), 90 ≈ camera pointing at horizon in landscape-ish hold.
-    // Phone Hs ≈ |beta| when holding as a sighting tube (camera along long axis, screen up).
-    // Compact blob offset in the frame adjusts a few degrees — still honesty band 0.3–1°.
-    if (beta == null) return null;
-    var pitch = Math.abs(beta);
-    // When phone is aimed upward, beta approaches 0 (face-up) or 90 (edge). Use complementary gamma.
-    var tilt = Math.sqrt(beta * beta + (gamma || 0) * (gamma || 0));
-    var fromHorizon = Math.max(0, Math.min(90, 90 - Math.abs(Math.abs(beta) - 90)));
-    // Prefer elevation of the optical axis: 90° − |beta| when beta is pitch from vertical.
-    var hs = 90 - Math.abs(beta);
-    if (hs < 0) hs = 0;
-    if (hs > 90) hs = 90;
-    // Small correction from blob vs frame center (vertical FOV ~54° typical).
-    if (blob && blob.ny != null) {
-      var vfov = 54;
-      hs += (0.5 - blob.ny) * vfov;
-    }
-    if (hs < 0 || hs > 90) return null;
-    return hs;
   }
 
   function detectSun() {
     var video = $("video");
     var work = $("work");
-    if (!video.videoWidth) return null;
-    var w = work.width;
-    var h = work.height;
+    if (!video || !video.videoWidth) return null;
+    var w = work.width, h = work.height;
     var ctx = work.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(video, 0, 0, w, h);
-    var img = ctx.getImageData(0, 0, w, h);
-    var data = img.data;
-    var best = 0;
-    var bx = 0, by = 0, n = 0, sx = 0, sy = 0;
-    var thresh = 240;
+    var data = ctx.getImageData(0, 0, w, h).data;
+    var n = 0, sx = 0, sy = 0;
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
         var i = (y * w + x) * 4;
         var r = data[i], g = data[i + 1], b = data[i + 2];
         var yv = 0.299 * r + 0.587 * g + 0.114 * b;
-        if (yv >= thresh && r > 200 && g > 160) {
-          n++;
-          sx += x;
-          sy += y;
-          if (yv > best) { best = yv; bx = x; by = y; }
+        if (yv >= 235 && r > 190 && g > 150) {
+          n++; sx += x; sy += y;
         }
       }
     }
-    var area = w * h;
-    if (n < 4 || n > area * 0.12) return null; // not compact
-    var cx = sx / n, cy = sy / n;
-    return { x: cx, y: cy, nx: cx / w, ny: cy / h, n: n };
+    if (n < 3 || n > w * h * 0.15) return null;
+    return { nx: (sx / n) / w, ny: (sy / n) / h };
   }
 
-  function loopDetect() {
+  function altitudeFromImu(blob) {
+    if (!state.imuReady || state.beta == null) return null;
+    var hs = 90 - Math.abs(state.beta);
+    if (blob && blob.ny != null) hs += (0.5 - blob.ny) * 54;
+    if (hs < 0 || hs > 90) return null;
+    return hs;
+  }
+
+  function sunAt(gps, utc) {
+    var sun = C.sunEquatorial(utc);
+    if (!gps) {
+      return { sun: sun, hc: null, zn: null };
+    }
+    var lha = C.lha_deg(sun.gha_deg, gps.lon);
+    var hc = C.computed_altitude(gps.lat, sun.dec_deg, lha);
+    var zn = C.azimuth_zn(gps.lat, sun.dec_deg, lha, hc);
+    return { sun: sun, hc: hc, zn: zn };
+  }
+
+  function renderResult(rec) {
+    var html = "";
+    function row(k, v) {
+      html += '<div class="row"><span class="k">' + k + '</span><span class="v">' + v + "</span></div>";
+    }
+    if (rec.gps) {
+      row("אתה כאן", fmtLat(rec.gps.lat) + "<br>" + fmtLon(rec.gps.lon));
+      row("דיוק GPS", rec.gps.acc != null ? Math.round(rec.gps.acc) + " מ׳" : EM);
+    } else {
+      row("מיקום GPS", "לא אושר — אפשר בלי, אבל המיקום לא יוצג");
+    }
+    if (rec.hc != null) {
+      if (rec.hc > 0) {
+        row("השמש עכשיו", fmt(rec.hc, 1) + "° מעל האופק");
+        row("כיוון השמש", fmt(rec.zn, 0) + "°");
+      } else {
+        row("השמש עכשיו", "מתחת לאופק (" + fmt(rec.hc, 1) + "°)");
+        row("כיוון", fmt(rec.zn, 0) + "°");
+      }
+    }
+    if (rec.measured != null) {
+      row("הטלפון מדד", fmt(rec.measured, 1) + "°");
+      if (rec.hc != null) {
+        var d = rec.measured - rec.hc;
+        row("הפרש מול החישוב", (d >= 0 ? "+" : "") + fmt(d, 1) + "°");
+      }
+    } else {
+      row("מדידת טלפון", rec.imuNote || "אין חיישן תנועה — נשארים על GPS");
+    }
+    row("זמן", rec.utc.toISOString().replace("T", " ").slice(0, 19) + " UTC");
+    $("resultCard").innerHTML = html;
+    show("result");
+  }
+
+  function finish(measured, imuNote) {
+    stopCamera();
+    var utc = new Date();
+    var pack = sunAt(state.gps, utc);
+    renderResult({
+      gps: state.gps,
+      hc: pack.hc,
+      zn: pack.zn,
+      measured: measured,
+      imuNote: imuNote,
+      utc: utc,
+    });
+  }
+
+  function loopOverlay() {
     var ov = $("overlay");
     var video = $("video");
     function tick() {
       if (!state.stream) return;
-      if (video.videoWidth) {
+      if (video.videoWidth && ov) {
         ov.width = ov.clientWidth * (window.devicePixelRatio || 1);
         ov.height = ov.clientHeight * (window.devicePixelRatio || 1);
         var octx = ov.getContext("2d");
         octx.clearRect(0, 0, ov.width, ov.height);
         var blob = detectSun();
+        var ret = $("reticle");
         if (blob) {
-          octx.strokeStyle = "#e88c20";
-          octx.lineWidth = 4;
+          octx.strokeStyle = "#3dcc8a";
+          octx.lineWidth = 5;
           octx.beginPath();
-          octx.arc(blob.nx * ov.width, blob.ny * ov.height, 28, 0, Math.PI * 2);
+          octx.arc(blob.nx * ov.width, blob.ny * ov.height, 36, 0, Math.PI * 2);
           octx.stroke();
-        }
-        if (!state.imuReady) {
-          /* stay silent number-wise */
+          if (ret) ret.classList.add("ok");
+          $("aimStatus").textContent = "השמש בפריים — לחץ צלם";
+        } else {
+          if (ret) ret.classList.remove("ok");
+          $("aimStatus").textContent = state.imuReady
+            ? "כוון את העיגול לשמש"
+            : "כוון לשמש (בלי חיישן תנועה עדיין אפשר לצלם או לדלג)";
         }
       }
       requestAnimationFrame(tick);
@@ -440,8 +216,47 @@
     requestAnimationFrame(tick);
   }
 
+  $("btnGo").addEventListener("click", function () {
+    $("homeStatus").textContent = "מבקש מיקום, מצלמה ותנועה…";
+    Promise.all([getGPS(), requestMotion(), startCamera()]).then(function (all) {
+      state.gps = all[0];
+      var imu = all[1] || state.imuReady;
+      var cam = all[2];
+      if (!cam) {
+        finish(null, imu ? null : "אין מצלמה כאן — משתמשים ב-GPS ובחישוב השמש");
+        return;
+      }
+      show("aim");
+      loopOverlay();
+      $("aimStatus").textContent = imu
+        ? "כוון את העיגול לשמש ולחץ צלם"
+        : "אין חיישן תנועה. אפשר לצלם או לדלג ל-GPS.";
+    });
+  });
+
+  $("btnShoot").addEventListener("click", function () {
+    var blob = detectSun();
+    var hs = altitudeFromImu(blob);
+    if (hs == null) {
+      // still finish with GPS + computed sun; don't invent a number
+      finish(null, state.imuReady ? "לא הצלחתי למדוד גובה — נשארים על GPS" : "אין חיישן תנועה — נשארים על GPS");
+      return;
+    }
+    finish(hs, null);
+  });
+
+  $("btnSkipCam").addEventListener("click", function () {
+    finish(null, "דילגת על המצלמה");
+  });
+
+  $("btnAgain").addEventListener("click", function () {
+    stopCamera();
+    state.shots = [];
+    $("homeStatus").textContent = "";
+    show("home");
+  });
+
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(function () {});
+    navigator.serviceWorker.register("sw.js?v=2").catch(function () {});
   }
-  refreshLastBtn();
 })();
