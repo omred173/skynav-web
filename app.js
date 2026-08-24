@@ -77,14 +77,28 @@
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       return Promise.resolve(false);
     }
-    return navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
-      .then(function (stream) {
+    var tries = [
+      { video: { facingMode: { exact: "environment" } }, audio: false },
+      { video: { facingMode: { ideal: "environment" } }, audio: false },
+      { video: true, audio: false }
+    ];
+    function attempt(i) {
+      return navigator.mediaDevices.getUserMedia(tries[i]).then(function (stream) {
         state.stream = stream;
-        $("video").srcObject = stream;
+        var v = $("video");
+        v.srcObject = stream;
+        v.muted = true;
+        v.setAttribute("playsinline", "");
+        v.setAttribute("webkit-playsinline", "");
+        var p = v.play();
+        if (p && p.catch) p.catch(function () {});
         return true;
-      })
-      .catch(function () { return false; });
+      }).catch(function () {
+        if (i + 1 < tries.length) return attempt(i + 1);
+        return false;
+      });
+    }
+    return attempt(0);
   }
 
   function stopCamera() {
@@ -217,20 +231,18 @@
   }
 
   $("btnGo").addEventListener("click", function () {
-    $("homeStatus").textContent = "מבקש מיקום, מצלמה ותנועה…";
-    Promise.all([getGPS(), requestMotion(), startCamera()]).then(function (all) {
-      state.gps = all[0];
-      var imu = all[1] || state.imuReady;
-      var cam = all[2];
-      if (!cam) {
-        finish(null, imu ? null : "אין מצלמה כאן — משתמשים ב-GPS ובחישוב השמש");
+    $("homeStatus").textContent = "";
+    show("aim");
+    $("aimStatus").textContent = "פותח מצלמה… אשר אם קופץ חלון";
+    loopOverlay();
+    requestMotion();
+    getGPS().then(function (g) { state.gps = g; });
+    startCamera().then(function (cam) {
+      if (cam) {
+        $("aimStatus").textContent = "המצלמה פתוחה. כוון לשמש או דלג.";
         return;
       }
-      show("aim");
-      loopOverlay();
-      $("aimStatus").textContent = imu
-        ? "כוון את העיגול לשמש ולחץ צלם"
-        : "אין חיישן תנועה. אפשר לצלם או לדלג ל-GPS.";
+      $("aimStatus").textContent = "אין מצלמה. אפשר לדלג למיקום GPS.";
     });
   });
 
@@ -257,6 +269,6 @@
   });
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=2").catch(function () {});
+    navigator.serviceWorker.register("sw.js?v=3").catch(function () {});
   }
 })();
