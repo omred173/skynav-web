@@ -1,4 +1,4 @@
-const CACHE = "skynav-v2";
+const CACHE = "skynav-v3";
 const ASSETS = [
   "./",
   "./index.html",
