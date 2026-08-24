@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -9,96 +9,41 @@
   <title>SKYNAV</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
-  <button type="button" class="theme-toggle" id="themeBtn" aria-label="Theme">Sun mode</button>
-
   <section id="home" class="screen active">
     <div class="stack">
       <h1>SKYNAV</h1>
-      <p class="honesty">phone ~0.3–1° · sextant arc minutes</p>
-      <button type="button" class="primary" id="btnCamera">New sight — camera</button>
-      <button type="button" id="btnHs">Enter Hs</button>
-      <button type="button" class="ghost" id="btnLast" disabled>Last result — —</button>
+      <p class="honesty">כפתור אחד. הטלפון מוצא אותך ואת השמש.</p>
+      <button type="button" class="primary huge" id="btnGo">מצא מיקום</button>
+      <p class="status" id="homeStatus"></p>
     </div>
   </section>
 
-  <section id="sight-cam" class="screen">
+  <section id="aim" class="screen">
     <div class="stack">
-      <h2>Sight — camera + IMU</h2>
-      <p class="honesty">phone ~0.3–1°. Horizon lock required. Sun as a bright blob.</p>
       <div class="video-wrap">
         <video id="video" playsinline autoplay muted></video>
         <canvas id="overlay" class="overlay"></canvas>
+        <div class="reticle" id="reticle"></div>
       </div>
-      <p class="status" id="camStatus">Requesting camera and motion…</p>
-      <button type="button" id="btnHorizon" disabled>Lock horizon</button>
-      <button type="button" class="primary" id="btnShot" disabled>Take shot</button>
-      <button type="button" id="btnFinishCam" disabled>Finish series</button>
-      <button type="button" class="ghost" id="btnCamHome">Home</button>
-    </div>
-  </section>
-
-  <section id="sight-hs" class="screen">
-    <div class="stack">
-      <h2>Sight — enter Hs</h2>
-      <p class="honesty">sextant arc minutes</p>
-      <div class="pair">
-        <div>
-          <label for="hsDeg">Hs degrees</label>
-          <input id="hsDeg" type="number" inputmode="decimal" step="1">
-        </div>
-        <div>
-          <label for="hsMin">Hs minutes (0–60)</label>
-          <input id="hsMin" type="number" inputmode="decimal" min="0" max="60" step="0.1">
-        </div>
-      </div>
-      <label for="heM">Height of eye (m)</label>
-      <input id="heM" type="number" inputmode="decimal" value="3" min="0" step="0.1">
-      <label for="ieMin">Index error (arcmin, magnitude)</label>
-      <input id="ieMin" type="number" inputmode="decimal" value="0" step="0.1">
-      <label><input type="checkbox" id="ieOff"> Index off the arc</label>
-      <p class="status" id="hsStatus"></p>
-      <button type="button" class="primary" id="btnHsGo">Compute</button>
-      <button type="button" class="ghost" id="btnHsHome">Home</button>
+      <p class="status" id="aimStatus">כוון את העיגול לשמש</p>
+      <button type="button" class="primary huge" id="btnShoot">צלם</button>
+      <button type="button" class="ghost" id="btnSkipCam">דלג — רק מיקום GPS</button>
     </div>
   </section>
 
   <section id="result" class="screen">
     <div class="stack">
-      <span class="stamp" id="pathStamp">—</span>
-      <h2>Result</h2>
-      <p class="honesty">phone ~0.3–1° · sextant arc minutes</p>
-      <div class="card" id="resultRows"></div>
-      <div class="card">
-        <h2>Assumed position (AP)</h2>
-        <p class="status">GPS only for AP. Not used as altitude.</p>
-        <div class="pair">
-          <div>
-            <label for="apLat">AP lat °</label>
-            <input id="apLat" type="number" inputmode="decimal" step="0.0001">
-          </div>
-          <div>
-            <label for="apLon">AP lon ° E</label>
-            <input id="apLon" type="number" inputmode="decimal" step="0.0001">
-          </div>
-        </div>
-        <button type="button" id="btnGps">Use GPS for AP</button>
-        <p class="status" id="apStatus"></p>
-        <label for="crs">DR course ° (running fix)</label>
-        <input id="crs" type="number" inputmode="decimal" value="0">
-        <label for="dist">DR distance nmi</label>
-        <input id="dist" type="number" inputmode="decimal" value="0">
-        <button type="button" id="btnRecompute">Update intercept / running fix</button>
-      </div>
-      <button type="button" class="primary" id="btnDone">Done</button>
-      <button type="button" id="btnNewSame">New sight</button>
+      <h1>המיקום</h1>
+      <div class="card" id="resultCard"></div>
+      <button type="button" class="primary huge" id="btnAgain">שוב</button>
     </div>
   </section>
 
   <canvas id="work" width="320" height="240"></canvas>
-  <script src="celestial.js"></script>
-  <script src="app.js"></script>
+  <script src="celestial.js?v=2"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>
