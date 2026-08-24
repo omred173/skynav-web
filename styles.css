@@ -67,3 +67,6 @@ button.huge { min-height: 88px; font-size: 1.5rem; }
   border:3px solid rgba(255,255,255,.7); border-radius:50%; pointer-events:none; box-shadow:0 0 0 2px rgba(0,0,0,.35); }
 .reticle.ok { border-color:#3dcc8a; }
 html[lang=he] { }
+
+body.night video { filter: brightness(1.55) contrast(1.25) saturate(0.85); }
+#aimStatus { font-size: 1.05rem; line-height: 1.45; color: var(--fg); }
