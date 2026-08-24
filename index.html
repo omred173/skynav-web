@@ -9,13 +9,13 @@
   <title>SKYNAV</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <section id="home" class="screen active">
     <div class="stack">
       <h1>SKYNAV</h1>
-      <p class="honesty">כפתור אחד. הטלפון מוצא אותך ואת השמש.</p>
+      <p class="honesty">לילה: ירח וכוכבים. יום: שמש. כפתור אחד.</p>
       <button type="button" class="primary huge" id="btnGo">מצא מיקום</button>
       <p class="status" id="homeStatus"></p>
     </div>
@@ -28,9 +28,9 @@
         <canvas id="overlay" class="overlay"></canvas>
         <div class="reticle" id="reticle"></div>
       </div>
-      <p class="status" id="aimStatus">כוון את העיגול לשמש</p>
-      <button type="button" class="primary huge" id="btnShoot">צלם</button>
-      <button type="button" class="ghost" id="btnSkipCam">דלג — רק מיקום GPS</button>
+      <p class="status" id="aimStatus">כוון לירח או לכוכב בהיר</p>
+      <button type="button" class="primary huge" id="btnShoot">צלם סדרה</button>
+      <button type="button" class="ghost" id="btnSkipCam">רק חישוב שמיים, בלי מצלמה</button>
     </div>
   </section>
 
@@ -43,7 +43,7 @@
   </section>
 
   <canvas id="work" width="320" height="240"></canvas>
-  <script src="celestial.js?v=3"></script>
-  <script src="app.js?v=3"></script>
+  <script src="celestial.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
