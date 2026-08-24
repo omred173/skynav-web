@@ -138,7 +138,100 @@
     var sd_arcmin = 959.63 / r / 60.0;
     var hp_arcmin = 8.794 / r / 60.0;
 
-    return {
+  
+  function moonEquatorial(utc) {
+    var jd = julian_day(utc);
+    var t = julian_centuries(jd);
+    var Lp = _norm360(218.3164477 + 481267.88123421 * t);
+    var D = _norm360(297.8501921 + 445267.1114034 * t);
+    var M = _norm360(357.5291092 + 35999.0502909 * t);
+    var Mp = _norm360(134.9633964 + 477198.8675055 * t);
+    var F = _norm360(93.272095 + 483202.0175233 * t);
+    var Dr = D * DEG2RAD, Mr = M * DEG2RAD, Mpr = Mp * DEG2RAD, Fr = F * DEG2RAD;
+    var lon =
+      Lp +
+      6.289 * Math.sin(Mpr) +
+      1.274 * Math.sin(2 * Dr - Mpr) +
+      0.658 * Math.sin(2 * Dr) -
+      0.186 * Math.sin(Mr) -
+      0.214 * Math.sin(2 * Mpr) -
+      0.114 * Math.sin(2 * Fr);
+    var lat =
+      5.128 * Math.sin(Fr) +
+      0.281 * Math.sin(Mpr + Fr) +
+      0.278 * Math.sin(Mpr - Fr) +
+      0.173 * Math.sin(2 * Dr - Fr);
+    var omega = _norm360(125.04 - 1934.136 * t);
+    var l0 = _norm360(280.46646 + 36000.76983 * t + 0.0003032 * t * t);
+    var eps0 =
+      23.0 + 26.0 / 60.0 + 21.448 / 3600.0 - (46.815 / 3600.0) * t;
+    var eps = eps0 + 0.00256 * Math.cos(omega * DEG2RAD);
+    var lon_r = lon * DEG2RAD;
+    var lat_r = lat * DEG2RAD;
+    var eps_r = eps * DEG2RAD;
+    var dec = Math.asin(
+      Math.sin(lat_r) * Math.cos(eps_r) +
+        Math.cos(lat_r) * Math.sin(eps_r) * Math.sin(lon_r)
+    ) * RAD2DEG;
+    var ra = Math.atan2(
+      Math.sin(lon_r) * Math.cos(eps_r) - Math.tan(lat_r) * Math.sin(eps_r),
+      Math.cos(lon_r)
+    ) * RAD2DEG;
+    ra = _norm360(ra);
+    var gast = _greenwich_apparent_sidereal(jd, t, omega, l0, eps);
+    var gha = _norm360(gast - ra);
+    return { gha_deg: gha, dec_deg: dec, ra_deg: ra, gast_deg: gast, name: "ירח" };
+  }
+
+  var STARS = [
+    { name: "סיריוס", ra: 101.287, dec: -16.716, mag: -1.46 },
+    { name: "קאנופוס", ra: 95.988, dec: -52.696, mag: -0.74 },
+    { name: "ארקטורוס", ra: 213.915, dec: 19.182, mag: -0.05 },
+    { name: "וגה", ra: 279.235, dec: 38.784, mag: 0.03 },
+    { name: "קפלה", ra: 79.172, dec: 45.998, mag: 0.08 },
+    { name: "ריגל", ra: 78.634, dec: -8.202, mag: 0.13 },
+    { name: "פרוקיון", ra: 114.826, dec: 5.225, mag: 0.34 },
+    { name: "בטלגז", ra: 88.793, dec: 7.407, mag: 0.5 },
+    { name: "אלטאיר", ra: 297.696, dec: 8.868, mag: 0.76 },
+    { name: "אלדברן", ra: 68.98, dec: 16.509, mag: 0.85 },
+    { name: "אנטארס", ra: 247.352, dec: -26.432, mag: 0.96 },
+    { name: "ספיקה", ra: 201.298, dec: -11.161, mag: 0.98 },
+    { name: "פולוקס", ra: 116.329, dec: 28.026, mag: 1.14 },
+    { name: "פומלאוט", ra: 344.413, dec: -29.622, mag: 1.16 },
+    { name: "דנב", ra: 310.358, dec: 45.28, mag: 1.25 },
+    { name: "רגולוס", ra: 152.093, dec: 11.967, mag: 1.35 },
+    { name: "קסטור", ra: 113.65, dec: 31.888, mag: 1.58 },
+    { name: "בלאטריקס", ra: 81.283, dec: 6.35, mag: 1.64 },
+    { name: "אליות", ra: 193.507, dec: 55.96, mag: 1.77 },
+    { name: "דובה", ra: 165.932, dec: 61.751, mag: 1.79 }
+  ];
+
+  function altaz(lat, lon, ra_deg, dec_deg, gast_deg) {
+    var lst = _norm360(gast_deg + lon);
+    var ha = _norm360(lst - ra_deg);
+    var alt = computed_altitude(lat, dec_deg, ha);
+    var az = azimuth_zn(lat, dec_deg, ha, alt);
+    return { alt: alt, az: az, ha: ha };
+  }
+
+  function skyBodies(utc, lat, lon) {
+    var sun = sunEquatorial(utc);
+    var moon = moonEquatorial(utc);
+    var out = [];
+    var s = altaz(lat, lon, sun.ra_deg, sun.dec_deg, sun.gast_deg);
+    out.push({ name: "שמש", kind: "sun", alt: s.alt, az: s.az, mag: -26 });
+    var m = altaz(lat, lon, moon.ra_deg, moon.dec_deg, moon.gast_deg);
+    out.push({ name: "ירח", kind: "moon", alt: m.alt, az: m.az, mag: -12 });
+    for (var i = 0; i < STARS.length; i++) {
+      var st = STARS[i];
+      var a = altaz(lat, lon, st.ra, st.dec, sun.gast_deg);
+      if (a.alt > -2) out.push({ name: st.name, kind: "star", alt: a.alt, az: a.az, mag: st.mag });
+    }
+    out.sort(function (x, y) { return x.mag - y.mag; });
+    return { sun: sun, moon: moon, bodies: out, night: s.alt < -1 };
+  }
+
+  return {
       gha_deg: gha,
       dec_deg: dec,
       ra_deg: ra,
@@ -192,7 +285,100 @@
     } else {
       throw new Error("limb must be lower, upper, or center");
     }
-    return {
+  
+  function moonEquatorial(utc) {
+    var jd = julian_day(utc);
+    var t = julian_centuries(jd);
+    var Lp = _norm360(218.3164477 + 481267.88123421 * t);
+    var D = _norm360(297.8501921 + 445267.1114034 * t);
+    var M = _norm360(357.5291092 + 35999.0502909 * t);
+    var Mp = _norm360(134.9633964 + 477198.8675055 * t);
+    var F = _norm360(93.272095 + 483202.0175233 * t);
+    var Dr = D * DEG2RAD, Mr = M * DEG2RAD, Mpr = Mp * DEG2RAD, Fr = F * DEG2RAD;
+    var lon =
+      Lp +
+      6.289 * Math.sin(Mpr) +
+      1.274 * Math.sin(2 * Dr - Mpr) +
+      0.658 * Math.sin(2 * Dr) -
+      0.186 * Math.sin(Mr) -
+      0.214 * Math.sin(2 * Mpr) -
+      0.114 * Math.sin(2 * Fr);
+    var lat =
+      5.128 * Math.sin(Fr) +
+      0.281 * Math.sin(Mpr + Fr) +
+      0.278 * Math.sin(Mpr - Fr) +
+      0.173 * Math.sin(2 * Dr - Fr);
+    var omega = _norm360(125.04 - 1934.136 * t);
+    var l0 = _norm360(280.46646 + 36000.76983 * t + 0.0003032 * t * t);
+    var eps0 =
+      23.0 + 26.0 / 60.0 + 21.448 / 3600.0 - (46.815 / 3600.0) * t;
+    var eps = eps0 + 0.00256 * Math.cos(omega * DEG2RAD);
+    var lon_r = lon * DEG2RAD;
+    var lat_r = lat * DEG2RAD;
+    var eps_r = eps * DEG2RAD;
+    var dec = Math.asin(
+      Math.sin(lat_r) * Math.cos(eps_r) +
+        Math.cos(lat_r) * Math.sin(eps_r) * Math.sin(lon_r)
+    ) * RAD2DEG;
+    var ra = Math.atan2(
+      Math.sin(lon_r) * Math.cos(eps_r) - Math.tan(lat_r) * Math.sin(eps_r),
+      Math.cos(lon_r)
+    ) * RAD2DEG;
+    ra = _norm360(ra);
+    var gast = _greenwich_apparent_sidereal(jd, t, omega, l0, eps);
+    var gha = _norm360(gast - ra);
+    return { gha_deg: gha, dec_deg: dec, ra_deg: ra, gast_deg: gast, name: "ירח" };
+  }
+
+  var STARS = [
+    { name: "סיריוס", ra: 101.287, dec: -16.716, mag: -1.46 },
+    { name: "קאנופוס", ra: 95.988, dec: -52.696, mag: -0.74 },
+    { name: "ארקטורוס", ra: 213.915, dec: 19.182, mag: -0.05 },
+    { name: "וגה", ra: 279.235, dec: 38.784, mag: 0.03 },
+    { name: "קפלה", ra: 79.172, dec: 45.998, mag: 0.08 },
+    { name: "ריגל", ra: 78.634, dec: -8.202, mag: 0.13 },
+    { name: "פרוקיון", ra: 114.826, dec: 5.225, mag: 0.34 },
+    { name: "בטלגז", ra: 88.793, dec: 7.407, mag: 0.5 },
+    { name: "אלטאיר", ra: 297.696, dec: 8.868, mag: 0.76 },
+    { name: "אלדברן", ra: 68.98, dec: 16.509, mag: 0.85 },
+    { name: "אנטארס", ra: 247.352, dec: -26.432, mag: 0.96 },
+    { name: "ספיקה", ra: 201.298, dec: -11.161, mag: 0.98 },
+    { name: "פולוקס", ra: 116.329, dec: 28.026, mag: 1.14 },
+    { name: "פומלאוט", ra: 344.413, dec: -29.622, mag: 1.16 },
+    { name: "דנב", ra: 310.358, dec: 45.28, mag: 1.25 },
+    { name: "רגולוס", ra: 152.093, dec: 11.967, mag: 1.35 },
+    { name: "קסטור", ra: 113.65, dec: 31.888, mag: 1.58 },
+    { name: "בלאטריקס", ra: 81.283, dec: 6.35, mag: 1.64 },
+    { name: "אליות", ra: 193.507, dec: 55.96, mag: 1.77 },
+    { name: "דובה", ra: 165.932, dec: 61.751, mag: 1.79 }
+  ];
+
+  function altaz(lat, lon, ra_deg, dec_deg, gast_deg) {
+    var lst = _norm360(gast_deg + lon);
+    var ha = _norm360(lst - ra_deg);
+    var alt = computed_altitude(lat, dec_deg, ha);
+    var az = azimuth_zn(lat, dec_deg, ha, alt);
+    return { alt: alt, az: az, ha: ha };
+  }
+
+  function skyBodies(utc, lat, lon) {
+    var sun = sunEquatorial(utc);
+    var moon = moonEquatorial(utc);
+    var out = [];
+    var s = altaz(lat, lon, sun.ra_deg, sun.dec_deg, sun.gast_deg);
+    out.push({ name: "שמש", kind: "sun", alt: s.alt, az: s.az, mag: -26 });
+    var m = altaz(lat, lon, moon.ra_deg, moon.dec_deg, moon.gast_deg);
+    out.push({ name: "ירח", kind: "moon", alt: m.alt, az: m.az, mag: -12 });
+    for (var i = 0; i < STARS.length; i++) {
+      var st = STARS[i];
+      var a = altaz(lat, lon, st.ra, st.dec, sun.gast_deg);
+      if (a.alt > -2) out.push({ name: st.name, kind: "star", alt: a.alt, az: a.az, mag: st.mag });
+    }
+    out.sort(function (x, y) { return x.mag - y.mag; });
+    return { sun: sun, moon: moon, bodies: out, night: s.alt < -1 };
+  }
+
+  return {
       hs_deg: hs_deg,
       ic_arcmin: ic,
       dip_arcmin: dipA,
@@ -238,7 +424,100 @@
     var hc = computed_altitude(ap_lat_deg, dec_deg, lha);
     var zn = azimuth_zn(ap_lat_deg, dec_deg, lha, hc);
     var a_nm = (ho_deg - hc) * 60.0;
-    return {
+  
+  function moonEquatorial(utc) {
+    var jd = julian_day(utc);
+    var t = julian_centuries(jd);
+    var Lp = _norm360(218.3164477 + 481267.88123421 * t);
+    var D = _norm360(297.8501921 + 445267.1114034 * t);
+    var M = _norm360(357.5291092 + 35999.0502909 * t);
+    var Mp = _norm360(134.9633964 + 477198.8675055 * t);
+    var F = _norm360(93.272095 + 483202.0175233 * t);
+    var Dr = D * DEG2RAD, Mr = M * DEG2RAD, Mpr = Mp * DEG2RAD, Fr = F * DEG2RAD;
+    var lon =
+      Lp +
+      6.289 * Math.sin(Mpr) +
+      1.274 * Math.sin(2 * Dr - Mpr) +
+      0.658 * Math.sin(2 * Dr) -
+      0.186 * Math.sin(Mr) -
+      0.214 * Math.sin(2 * Mpr) -
+      0.114 * Math.sin(2 * Fr);
+    var lat =
+      5.128 * Math.sin(Fr) +
+      0.281 * Math.sin(Mpr + Fr) +
+      0.278 * Math.sin(Mpr - Fr) +
+      0.173 * Math.sin(2 * Dr - Fr);
+    var omega = _norm360(125.04 - 1934.136 * t);
+    var l0 = _norm360(280.46646 + 36000.76983 * t + 0.0003032 * t * t);
+    var eps0 =
+      23.0 + 26.0 / 60.0 + 21.448 / 3600.0 - (46.815 / 3600.0) * t;
+    var eps = eps0 + 0.00256 * Math.cos(omega * DEG2RAD);
+    var lon_r = lon * DEG2RAD;
+    var lat_r = lat * DEG2RAD;
+    var eps_r = eps * DEG2RAD;
+    var dec = Math.asin(
+      Math.sin(lat_r) * Math.cos(eps_r) +
+        Math.cos(lat_r) * Math.sin(eps_r) * Math.sin(lon_r)
+    ) * RAD2DEG;
+    var ra = Math.atan2(
+      Math.sin(lon_r) * Math.cos(eps_r) - Math.tan(lat_r) * Math.sin(eps_r),
+      Math.cos(lon_r)
+    ) * RAD2DEG;
+    ra = _norm360(ra);
+    var gast = _greenwich_apparent_sidereal(jd, t, omega, l0, eps);
+    var gha = _norm360(gast - ra);
+    return { gha_deg: gha, dec_deg: dec, ra_deg: ra, gast_deg: gast, name: "ירח" };
+  }
+
+  var STARS = [
+    { name: "סיריוס", ra: 101.287, dec: -16.716, mag: -1.46 },
+    { name: "קאנופוס", ra: 95.988, dec: -52.696, mag: -0.74 },
+    { name: "ארקטורוס", ra: 213.915, dec: 19.182, mag: -0.05 },
+    { name: "וגה", ra: 279.235, dec: 38.784, mag: 0.03 },
+    { name: "קפלה", ra: 79.172, dec: 45.998, mag: 0.08 },
+    { name: "ריגל", ra: 78.634, dec: -8.202, mag: 0.13 },
+    { name: "פרוקיון", ra: 114.826, dec: 5.225, mag: 0.34 },
+    { name: "בטלגז", ra: 88.793, dec: 7.407, mag: 0.5 },
+    { name: "אלטאיר", ra: 297.696, dec: 8.868, mag: 0.76 },
+    { name: "אלדברן", ra: 68.98, dec: 16.509, mag: 0.85 },
+    { name: "אנטארס", ra: 247.352, dec: -26.432, mag: 0.96 },
+    { name: "ספיקה", ra: 201.298, dec: -11.161, mag: 0.98 },
+    { name: "פולוקס", ra: 116.329, dec: 28.026, mag: 1.14 },
+    { name: "פומלאוט", ra: 344.413, dec: -29.622, mag: 1.16 },
+    { name: "דנב", ra: 310.358, dec: 45.28, mag: 1.25 },
+    { name: "רגולוס", ra: 152.093, dec: 11.967, mag: 1.35 },
+    { name: "קסטור", ra: 113.65, dec: 31.888, mag: 1.58 },
+    { name: "בלאטריקס", ra: 81.283, dec: 6.35, mag: 1.64 },
+    { name: "אליות", ra: 193.507, dec: 55.96, mag: 1.77 },
+    { name: "דובה", ra: 165.932, dec: 61.751, mag: 1.79 }
+  ];
+
+  function altaz(lat, lon, ra_deg, dec_deg, gast_deg) {
+    var lst = _norm360(gast_deg + lon);
+    var ha = _norm360(lst - ra_deg);
+    var alt = computed_altitude(lat, dec_deg, ha);
+    var az = azimuth_zn(lat, dec_deg, ha, alt);
+    return { alt: alt, az: az, ha: ha };
+  }
+
+  function skyBodies(utc, lat, lon) {
+    var sun = sunEquatorial(utc);
+    var moon = moonEquatorial(utc);
+    var out = [];
+    var s = altaz(lat, lon, sun.ra_deg, sun.dec_deg, sun.gast_deg);
+    out.push({ name: "שמש", kind: "sun", alt: s.alt, az: s.az, mag: -26 });
+    var m = altaz(lat, lon, moon.ra_deg, moon.dec_deg, moon.gast_deg);
+    out.push({ name: "ירח", kind: "moon", alt: m.alt, az: m.az, mag: -12 });
+    for (var i = 0; i < STARS.length; i++) {
+      var st = STARS[i];
+      var a = altaz(lat, lon, st.ra, st.dec, sun.gast_deg);
+      if (a.alt > -2) out.push({ name: st.name, kind: "star", alt: a.alt, az: a.az, mag: st.mag });
+    }
+    out.sort(function (x, y) { return x.mag - y.mag; });
+    return { sun: sun, moon: moon, bodies: out, night: s.alt < -1 };
+  }
+
+  return {
       hc_deg: hc,
       ho_deg: ho_deg,
       intercept_nm: Math.abs(a_nm),
@@ -285,7 +564,100 @@
 
   function advance_lop(lop, course_deg, distance_nm) {
     var p = dest_point(lop.lat_deg, lop.lon_east_deg, course_deg, distance_nm);
-    return {
+  
+  function moonEquatorial(utc) {
+    var jd = julian_day(utc);
+    var t = julian_centuries(jd);
+    var Lp = _norm360(218.3164477 + 481267.88123421 * t);
+    var D = _norm360(297.8501921 + 445267.1114034 * t);
+    var M = _norm360(357.5291092 + 35999.0502909 * t);
+    var Mp = _norm360(134.9633964 + 477198.8675055 * t);
+    var F = _norm360(93.272095 + 483202.0175233 * t);
+    var Dr = D * DEG2RAD, Mr = M * DEG2RAD, Mpr = Mp * DEG2RAD, Fr = F * DEG2RAD;
+    var lon =
+      Lp +
+      6.289 * Math.sin(Mpr) +
+      1.274 * Math.sin(2 * Dr - Mpr) +
+      0.658 * Math.sin(2 * Dr) -
+      0.186 * Math.sin(Mr) -
+      0.214 * Math.sin(2 * Mpr) -
+      0.114 * Math.sin(2 * Fr);
+    var lat =
+      5.128 * Math.sin(Fr) +
+      0.281 * Math.sin(Mpr + Fr) +
+      0.278 * Math.sin(Mpr - Fr) +
+      0.173 * Math.sin(2 * Dr - Fr);
+    var omega = _norm360(125.04 - 1934.136 * t);
+    var l0 = _norm360(280.46646 + 36000.76983 * t + 0.0003032 * t * t);
+    var eps0 =
+      23.0 + 26.0 / 60.0 + 21.448 / 3600.0 - (46.815 / 3600.0) * t;
+    var eps = eps0 + 0.00256 * Math.cos(omega * DEG2RAD);
+    var lon_r = lon * DEG2RAD;
+    var lat_r = lat * DEG2RAD;
+    var eps_r = eps * DEG2RAD;
+    var dec = Math.asin(
+      Math.sin(lat_r) * Math.cos(eps_r) +
+        Math.cos(lat_r) * Math.sin(eps_r) * Math.sin(lon_r)
+    ) * RAD2DEG;
+    var ra = Math.atan2(
+      Math.sin(lon_r) * Math.cos(eps_r) - Math.tan(lat_r) * Math.sin(eps_r),
+      Math.cos(lon_r)
+    ) * RAD2DEG;
+    ra = _norm360(ra);
+    var gast = _greenwich_apparent_sidereal(jd, t, omega, l0, eps);
+    var gha = _norm360(gast - ra);
+    return { gha_deg: gha, dec_deg: dec, ra_deg: ra, gast_deg: gast, name: "ירח" };
+  }
+
+  var STARS = [
+    { name: "סיריוס", ra: 101.287, dec: -16.716, mag: -1.46 },
+    { name: "קאנופוס", ra: 95.988, dec: -52.696, mag: -0.74 },
+    { name: "ארקטורוס", ra: 213.915, dec: 19.182, mag: -0.05 },
+    { name: "וגה", ra: 279.235, dec: 38.784, mag: 0.03 },
+    { name: "קפלה", ra: 79.172, dec: 45.998, mag: 0.08 },
+    { name: "ריגל", ra: 78.634, dec: -8.202, mag: 0.13 },
+    { name: "פרוקיון", ra: 114.826, dec: 5.225, mag: 0.34 },
+    { name: "בטלגז", ra: 88.793, dec: 7.407, mag: 0.5 },
+    { name: "אלטאיר", ra: 297.696, dec: 8.868, mag: 0.76 },
+    { name: "אלדברן", ra: 68.98, dec: 16.509, mag: 0.85 },
+    { name: "אנטארס", ra: 247.352, dec: -26.432, mag: 0.96 },
+    { name: "ספיקה", ra: 201.298, dec: -11.161, mag: 0.98 },
+    { name: "פולוקס", ra: 116.329, dec: 28.026, mag: 1.14 },
+    { name: "פומלאוט", ra: 344.413, dec: -29.622, mag: 1.16 },
+    { name: "דנב", ra: 310.358, dec: 45.28, mag: 1.25 },
+    { name: "רגולוס", ra: 152.093, dec: 11.967, mag: 1.35 },
+    { name: "קסטור", ra: 113.65, dec: 31.888, mag: 1.58 },
+    { name: "בלאטריקס", ra: 81.283, dec: 6.35, mag: 1.64 },
+    { name: "אליות", ra: 193.507, dec: 55.96, mag: 1.77 },
+    { name: "דובה", ra: 165.932, dec: 61.751, mag: 1.79 }
+  ];
+
+  function altaz(lat, lon, ra_deg, dec_deg, gast_deg) {
+    var lst = _norm360(gast_deg + lon);
+    var ha = _norm360(lst - ra_deg);
+    var alt = computed_altitude(lat, dec_deg, ha);
+    var az = azimuth_zn(lat, dec_deg, ha, alt);
+    return { alt: alt, az: az, ha: ha };
+  }
+
+  function skyBodies(utc, lat, lon) {
+    var sun = sunEquatorial(utc);
+    var moon = moonEquatorial(utc);
+    var out = [];
+    var s = altaz(lat, lon, sun.ra_deg, sun.dec_deg, sun.gast_deg);
+    out.push({ name: "שמש", kind: "sun", alt: s.alt, az: s.az, mag: -26 });
+    var m = altaz(lat, lon, moon.ra_deg, moon.dec_deg, moon.gast_deg);
+    out.push({ name: "ירח", kind: "moon", alt: m.alt, az: m.az, mag: -12 });
+    for (var i = 0; i < STARS.length; i++) {
+      var st = STARS[i];
+      var a = altaz(lat, lon, st.ra, st.dec, sun.gast_deg);
+      if (a.alt > -2) out.push({ name: st.name, kind: "star", alt: a.alt, az: a.az, mag: st.mag });
+    }
+    out.sort(function (x, y) { return x.mag - y.mag; });
+    return { sun: sun, moon: moon, bodies: out, night: s.alt < -1 };
+  }
+
+  return {
       lat_deg: p[0],
       lon_east_deg: p[1],
       zn_deg: lop.zn_deg,
@@ -353,6 +725,99 @@
     return sum / xs.length;
   }
 
+
+  function moonEquatorial(utc) {
+    var jd = julian_day(utc);
+    var t = julian_centuries(jd);
+    var Lp = _norm360(218.3164477 + 481267.88123421 * t);
+    var D = _norm360(297.8501921 + 445267.1114034 * t);
+    var M = _norm360(357.5291092 + 35999.0502909 * t);
+    var Mp = _norm360(134.9633964 + 477198.8675055 * t);
+    var F = _norm360(93.272095 + 483202.0175233 * t);
+    var Dr = D * DEG2RAD, Mr = M * DEG2RAD, Mpr = Mp * DEG2RAD, Fr = F * DEG2RAD;
+    var lon =
+      Lp +
+      6.289 * Math.sin(Mpr) +
+      1.274 * Math.sin(2 * Dr - Mpr) +
+      0.658 * Math.sin(2 * Dr) -
+      0.186 * Math.sin(Mr) -
+      0.214 * Math.sin(2 * Mpr) -
+      0.114 * Math.sin(2 * Fr);
+    var lat =
+      5.128 * Math.sin(Fr) +
+      0.281 * Math.sin(Mpr + Fr) +
+      0.278 * Math.sin(Mpr - Fr) +
+      0.173 * Math.sin(2 * Dr - Fr);
+    var omega = _norm360(125.04 - 1934.136 * t);
+    var l0 = _norm360(280.46646 + 36000.76983 * t + 0.0003032 * t * t);
+    var eps0 =
+      23.0 + 26.0 / 60.0 + 21.448 / 3600.0 - (46.815 / 3600.0) * t;
+    var eps = eps0 + 0.00256 * Math.cos(omega * DEG2RAD);
+    var lon_r = lon * DEG2RAD;
+    var lat_r = lat * DEG2RAD;
+    var eps_r = eps * DEG2RAD;
+    var dec = Math.asin(
+      Math.sin(lat_r) * Math.cos(eps_r) +
+        Math.cos(lat_r) * Math.sin(eps_r) * Math.sin(lon_r)
+    ) * RAD2DEG;
+    var ra = Math.atan2(
+      Math.sin(lon_r) * Math.cos(eps_r) - Math.tan(lat_r) * Math.sin(eps_r),
+      Math.cos(lon_r)
+    ) * RAD2DEG;
+    ra = _norm360(ra);
+    var gast = _greenwich_apparent_sidereal(jd, t, omega, l0, eps);
+    var gha = _norm360(gast - ra);
+    return { gha_deg: gha, dec_deg: dec, ra_deg: ra, gast_deg: gast, name: "ירח" };
+  }
+
+  var STARS = [
+    { name: "סיריוס", ra: 101.287, dec: -16.716, mag: -1.46 },
+    { name: "קאנופוס", ra: 95.988, dec: -52.696, mag: -0.74 },
+    { name: "ארקטורוס", ra: 213.915, dec: 19.182, mag: -0.05 },
+    { name: "וגה", ra: 279.235, dec: 38.784, mag: 0.03 },
+    { name: "קפלה", ra: 79.172, dec: 45.998, mag: 0.08 },
+    { name: "ריגל", ra: 78.634, dec: -8.202, mag: 0.13 },
+    { name: "פרוקיון", ra: 114.826, dec: 5.225, mag: 0.34 },
+    { name: "בטלגז", ra: 88.793, dec: 7.407, mag: 0.5 },
+    { name: "אלטאיר", ra: 297.696, dec: 8.868, mag: 0.76 },
+    { name: "אלדברן", ra: 68.98, dec: 16.509, mag: 0.85 },
+    { name: "אנטארס", ra: 247.352, dec: -26.432, mag: 0.96 },
+    { name: "ספיקה", ra: 201.298, dec: -11.161, mag: 0.98 },
+    { name: "פולוקס", ra: 116.329, dec: 28.026, mag: 1.14 },
+    { name: "פומלאוט", ra: 344.413, dec: -29.622, mag: 1.16 },
+    { name: "דנב", ra: 310.358, dec: 45.28, mag: 1.25 },
+    { name: "רגולוס", ra: 152.093, dec: 11.967, mag: 1.35 },
+    { name: "קסטור", ra: 113.65, dec: 31.888, mag: 1.58 },
+    { name: "בלאטריקס", ra: 81.283, dec: 6.35, mag: 1.64 },
+    { name: "אליות", ra: 193.507, dec: 55.96, mag: 1.77 },
+    { name: "דובה", ra: 165.932, dec: 61.751, mag: 1.79 }
+  ];
+
+  function altaz(lat, lon, ra_deg, dec_deg, gast_deg) {
+    var lst = _norm360(gast_deg + lon);
+    var ha = _norm360(lst - ra_deg);
+    var alt = computed_altitude(lat, dec_deg, ha);
+    var az = azimuth_zn(lat, dec_deg, ha, alt);
+    return { alt: alt, az: az, ha: ha };
+  }
+
+  function skyBodies(utc, lat, lon) {
+    var sun = sunEquatorial(utc);
+    var moon = moonEquatorial(utc);
+    var out = [];
+    var s = altaz(lat, lon, sun.ra_deg, sun.dec_deg, sun.gast_deg);
+    out.push({ name: "שמש", kind: "sun", alt: s.alt, az: s.az, mag: -26 });
+    var m = altaz(lat, lon, moon.ra_deg, moon.dec_deg, moon.gast_deg);
+    out.push({ name: "ירח", kind: "moon", alt: m.alt, az: m.az, mag: -12 });
+    for (var i = 0; i < STARS.length; i++) {
+      var st = STARS[i];
+      var a = altaz(lat, lon, st.ra, st.dec, sun.gast_deg);
+      if (a.alt > -2) out.push({ name: st.name, kind: "star", alt: a.alt, az: a.az, mag: st.mag });
+    }
+    out.sort(function (x, y) { return x.mag - y.mag; });
+    return { sun: sun, moon: moon, bodies: out, night: s.alt < -1 };
+  }
+
   return {
     DEG2RAD: DEG2RAD,
     RAD2DEG: RAD2DEG,
@@ -362,6 +827,10 @@
     julian_day: julian_day,
     julian_centuries: julian_centuries,
     sunEquatorial: sunEquatorial,
+    moonEquatorial: moonEquatorial,
+    STARS: STARS,
+    altaz: altaz,
+    skyBodies: skyBodies,
     dip: dip,
     dip_arcmin: dip,
     refractionBennett: refractionBennett,
