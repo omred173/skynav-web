@@ -2,14 +2,16 @@
   "use strict";
   var C = window.SKYNAV;
   var EM = "\u2014";
+  var FALLBACK = { lat: 31.2518, lon: 34.7913, acc: null, source: "beersheva" };
 
   var state = {
     stream: null,
     imuReady: false,
     beta: null,
     gamma: null,
+    heading: null,
     gps: null,
-    shots: [],
+    stack: [],
   };
 
   function $(id) { return document.getElementById(id); }
@@ -20,15 +22,16 @@
   }
   function fmt(n, d) {
     if (n == null || !isFinite(n)) return EM;
-    return Number(n).toFixed(d == null ? 2 : d);
+    return Number(n).toFixed(d == null ? 1 : d);
+  }
+  function place() {
+    return state.gps || FALLBACK;
   }
   function fmtLat(lat) {
-    if (lat == null || !isFinite(lat)) return EM;
-    return Math.abs(lat).toFixed(5) + "° " + (lat >= 0 ? "צפון" : "דרום");
+    return Math.abs(lat).toFixed(4) + "° " + (lat >= 0 ? "צפון" : "דרום");
   }
   function fmtLon(lon) {
-    if (lon == null || !isFinite(lon)) return EM;
-    return Math.abs(lon).toFixed(5) + "° " + (lon >= 0 ? "מזרח" : "מערב");
+    return Math.abs(lon).toFixed(4) + "° " + (lon >= 0 ? "מזרח" : "מערב");
   }
 
   function getGPS() {
@@ -40,37 +43,38 @@
             lat: pos.coords.latitude,
             lon: pos.coords.longitude,
             acc: pos.coords.accuracy,
+            source: "gps",
           });
         },
         function () { resolve(null); },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000 }
       );
     });
   }
 
   function requestMotion() {
-    return new Promise(function (resolve) {
-      function onOrient(ev) {
-        if (ev.beta == null) return;
+    function onOrient(ev) {
+      if (ev.beta != null) {
         state.beta = ev.beta;
         state.gamma = ev.gamma;
         state.imuReady = true;
       }
-      window.addEventListener("deviceorientation", onOrient, true);
-      window.addEventListener("deviceorientationabsolute", onOrient, true);
-      if (typeof DeviceMotionEvent !== "undefined" &&
-          typeof DeviceMotionEvent.requestPermission === "function") {
-        DeviceMotionEvent.requestPermission().catch(function () {});
+      if (typeof ev.webkitCompassHeading === "number") {
+        state.heading = ev.webkitCompassHeading;
+      } else if (ev.alpha != null) {
+        state.heading = (360 - ev.alpha) % 360;
       }
-      if (typeof DeviceOrientationEvent !== "undefined" &&
-          typeof DeviceOrientationEvent.requestPermission === "function") {
-        DeviceOrientationEvent.requestPermission()
-          .then(function (r) { resolve(r === "granted"); })
-          .catch(function () { resolve(false); });
-      } else {
-        setTimeout(function () { resolve(state.imuReady); }, 500);
-      }
-    });
+    }
+    window.addEventListener("deviceorientation", onOrient, true);
+    window.addEventListener("deviceorientationabsolute", onOrient, true);
+    if (typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function") {
+      DeviceOrientationEvent.requestPermission().catch(function () {});
+    }
+    if (typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function") {
+      DeviceMotionEvent.requestPermission().catch(function () {});
+    }
   }
 
   function startCamera() {
@@ -78,7 +82,7 @@
       return Promise.resolve(false);
     }
     var tries = [
-      { video: { facingMode: { exact: "environment" } }, audio: false },
+      { video: { facingMode: { exact: "environment" }, width: { ideal: 1920 } }, audio: false },
       { video: { facingMode: { ideal: "environment" } }, audio: false },
       { video: true, audio: false }
     ];
@@ -94,8 +98,7 @@
         if (p && p.catch) p.catch(function () {});
         return true;
       }).catch(function () {
-        if (i + 1 < tries.length) return attempt(i + 1);
-        return false;
+        return i + 1 < tries.length ? attempt(i + 1) : false;
       });
     }
     return attempt(0);
@@ -108,167 +111,234 @@
     }
   }
 
-  function detectSun() {
+  function lookAlt() {
+    if (state.beta == null) return 35;
+    var hs = 90 - Math.abs(state.beta);
+    if (hs < 0) hs = 0;
+    if (hs > 90) hs = 90;
+    return hs;
+  }
+
+  function lookAz() {
+    if (state.heading != null && isFinite(state.heading)) return state.heading;
+    return 180;
+  }
+
+  function grabFrame() {
     var video = $("video");
     var work = $("work");
-    if (!video || !video.videoWidth) return null;
-    var w = work.width, h = work.height;
+    if (!video.videoWidth) return null;
     var ctx = work.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(video, 0, 0, w, h);
-    var data = ctx.getImageData(0, 0, w, h).data;
+    ctx.drawImage(video, 0, 0, work.width, work.height);
+    return ctx.getImageData(0, 0, work.width, work.height);
+  }
+
+  function maxStack(frames) {
+    if (!frames.length) return null;
+    var w = frames[0].width, h = frames[0].height;
+    var out = new ImageData(w, h);
+    var n = frames.length;
+    for (var i = 0; i < out.data.length; i++) {
+      var m = 0;
+      for (var f = 0; f < n; f++) {
+        if (frames[f].data[i] > m) m = frames[f].data[i];
+      }
+      out.data[i] = m;
+    }
+    return out;
+  }
+
+  function detectMoon(img) {
+    if (!img) return null;
+    var w = img.width, h = img.height, data = img.data;
     var n = 0, sx = 0, sy = 0;
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
         var i = (y * w + x) * 4;
-        var r = data[i], g = data[i + 1], b = data[i + 2];
-        var yv = 0.299 * r + 0.587 * g + 0.114 * b;
-        if (yv >= 235 && r > 190 && g > 150) {
-          n++; sx += x; sy += y;
-        }
+        var yv = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        if (yv >= 200) { n++; sx += x; sy += y; }
       }
     }
-    if (n < 3 || n > w * h * 0.15) return null;
-    return { nx: (sx / n) / w, ny: (sy / n) / h };
+    var frac = n / (w * h);
+    if (n < 20 || frac > 0.25) return null;
+    return { nx: (sx / n) / w, ny: (sy / n) / h, n: n, frac: frac };
   }
 
-  function altitudeFromImu(blob) {
-    if (!state.imuReady || state.beta == null) return null;
-    var hs = 90 - Math.abs(state.beta);
-    if (blob && blob.ny != null) hs += (0.5 - blob.ny) * 54;
-    if (hs < 0 || hs > 90) return null;
-    return hs;
-  }
-
-  function sunAt(gps, utc) {
-    var sun = C.sunEquatorial(utc);
-    if (!gps) {
-      return { sun: sun, hc: null, zn: null };
+  function detectStars(img) {
+    if (!img) return [];
+    var w = img.width, h = img.height, data = img.data;
+    var hits = [];
+    for (var y = 2; y < h - 2; y += 2) {
+      for (var x = 2; x < w - 2; x += 2) {
+        var i = (y * w + x) * 4;
+        var yv = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        if (yv < 210) continue;
+        hits.push({ nx: x / w, ny: y / h, yv: yv });
+      }
     }
-    var lha = C.lha_deg(sun.gha_deg, gps.lon);
-    var hc = C.computed_altitude(gps.lat, sun.dec_deg, lha);
-    var zn = C.azimuth_zn(gps.lat, sun.dec_deg, lha, hc);
-    return { sun: sun, hc: hc, zn: zn };
+    hits.sort(function (a, b) { return b.yv - a.yv; });
+    return hits.slice(0, 12);
   }
 
-  function renderResult(rec) {
-    var html = "";
-    function row(k, v) {
-      html += '<div class="row"><span class="k">' + k + '</span><span class="v">' + v + "</span></div>";
-    }
-    if (rec.gps) {
-      row("אתה כאן", fmtLat(rec.gps.lat) + "<br>" + fmtLon(rec.gps.lon));
-      row("דיוק GPS", rec.gps.acc != null ? Math.round(rec.gps.acc) + " מ׳" : EM);
+  function project(body, la, lz) {
+    var daz = ((body.az - lz + 540) % 360) - 180;
+    var dalt = la - body.alt;
+    var hfov = 52, vfov = 68;
+    return { x: 0.5 + daz / hfov, y: 0.5 + dalt / vfov, body: body };
+  }
+
+  function explain(sky, moonBlob, starHits) {
+    var up = sky.bodies.filter(function (b) { return b.alt > 0; });
+    var lines = [];
+    if (sky.night) {
+      lines.push("לילה. השמש מתחת לאופק.");
     } else {
-      row("מיקום GPS", "לא אושר — אפשר בלי, אבל המיקום לא יוצג");
+      lines.push("יום. מחפשים שמש.");
     }
-    if (rec.hc != null) {
-      if (rec.hc > 0) {
-        row("השמש עכשיו", fmt(rec.hc, 1) + "° מעל האופק");
-        row("כיוון השמש", fmt(rec.zn, 0) + "°");
-      } else {
-        row("השמש עכשיו", "מתחת לאופק (" + fmt(rec.hc, 1) + "°)");
-        row("כיוון", fmt(rec.zn, 0) + "°");
-      }
+    var moon = sky.bodies.filter(function (b) { return b.kind === "moon"; })[0];
+    if (moon && moon.alt > 0) {
+      lines.push("ירח חזק: " + fmt(moon.alt) + "° מעל האופק, כיוון " + fmt(moon.az, 0) + "°.");
+      if (moonBlob) lines.push("המצלמה רואה כתם בהיר — כנראה היריח.");
+      else lines.push("כוון את העיגול לירח. כמה צילומים עוזרים.");
     }
-    if (rec.measured != null) {
-      row("הטלפון מדד", fmt(rec.measured, 1) + "°");
-      if (rec.hc != null) {
-        var d = rec.measured - rec.hc;
-        row("הפרש מול החישוב", (d >= 0 ? "+" : "") + fmt(d, 1) + "°");
-      }
-    } else {
-      row("מדידת טלפון", rec.imuNote || "אין חיישן תנועה — נשארים על GPS");
+    var stars = up.filter(function (b) { return b.kind === "star"; }).slice(0, 4);
+    if (stars.length) {
+      lines.push("כוכבים למעלה: " + stars.map(function (s) { return s.name; }).join(", ") + ".");
     }
-    row("זמן", rec.utc.toISOString().replace("T", " ").slice(0, 19) + " UTC");
-    $("resultCard").innerHTML = html;
-    show("result");
-  }
-
-  function finish(measured, imuNote) {
-    stopCamera();
-    var utc = new Date();
-    var pack = sunAt(state.gps, utc);
-    renderResult({
-      gps: state.gps,
-      hc: pack.hc,
-      zn: pack.zn,
-      measured: measured,
-      imuNote: imuNote,
-      utc: utc,
-    });
+    if (starHits.length) lines.push("נקודות בהירות בפריים: " + starHits.length + ".");
+    return lines.join(" ");
   }
 
   function loopOverlay() {
     var ov = $("overlay");
     var video = $("video");
     function tick() {
-      if (!state.stream) return;
+      if (!state.stream && !video.srcObject) {
+        requestAnimationFrame(tick);
+        return;
+      }
       if (video.videoWidth && ov) {
         ov.width = ov.clientWidth * (window.devicePixelRatio || 1);
         ov.height = ov.clientHeight * (window.devicePixelRatio || 1);
         var octx = ov.getContext("2d");
         octx.clearRect(0, 0, ov.width, ov.height);
-        var blob = detectSun();
-        var ret = $("reticle");
-        if (blob) {
-          octx.strokeStyle = "#3dcc8a";
-          octx.lineWidth = 5;
+        var loc = place();
+        var sky = C.skyBodies(new Date(), loc.lat, loc.lon);
+        var la = lookAlt();
+        var lz = lookAz();
+        sky.bodies.forEach(function (b) {
+          if (b.alt < 0) return;
+          var p = project(b, la, lz);
+          if (p.x < -0.05 || p.x > 1.05 || p.y < -0.05 || p.y > 1.05) return;
+          var x = p.x * ov.width, y = p.y * ov.height;
           octx.beginPath();
-          octx.arc(blob.nx * ov.width, blob.ny * ov.height, 36, 0, Math.PI * 2);
+          octx.strokeStyle = b.kind === "moon" ? "#f4e27a" : b.kind === "sun" ? "#e88c20" : "#9ad0ff";
+          octx.lineWidth = b.kind === "moon" ? 5 : 2;
+          octx.arc(x, y, b.kind === "moon" ? 28 : 8, 0, Math.PI * 2);
           octx.stroke();
-          if (ret) ret.classList.add("ok");
-          $("aimStatus").textContent = "השמש בפריים — לחץ צלם";
-        } else {
-          if (ret) ret.classList.remove("ok");
-          $("aimStatus").textContent = state.imuReady
-            ? "כוון את העיגול לשמש"
-            : "כוון לשמש (בלי חיישן תנועה עדיין אפשר לצלם או לדלג)";
-        }
+          octx.fillStyle = "#fff";
+          octx.font = "16px -apple-system, sans-serif";
+          octx.fillText(b.name, x + 12, y - 8);
+        });
+        var frame = grabFrame();
+        var moonBlob = detectMoon(frame);
+        var stars = detectStars(frame);
+        $("aimStatus").textContent = explain(sky, moonBlob, stars);
       }
       requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
   }
 
-  $("btnGo").addEventListener("click", function () {
-    $("homeStatus").textContent = "";
-    show("aim");
-    $("aimStatus").textContent = "פותח מצלמה… אשר אם קופץ חלון";
-    loopOverlay();
-    requestMotion();
-    getGPS().then(function (g) { state.gps = g; });
-    startCamera().then(function (cam) {
-      if (cam) {
-        $("aimStatus").textContent = "המצלמה פתוחה. כוון לשמש או דלג.";
+  function takeSeries() {
+    $("aimStatus").textContent = "מצלם סדרה…";
+    state.stack = [];
+    var n = 0;
+    function one() {
+      var f = grabFrame();
+      if (f) state.stack.push(f);
+      n++;
+      if (n < 8) {
+        setTimeout(one, 180);
         return;
       }
-      $("aimStatus").textContent = "אין מצלמה. אפשר לדלג למיקום GPS.";
+      var stacked = maxStack(state.stack);
+      var moonBlob = detectMoon(stacked);
+      var stars = detectStars(stacked);
+      var loc = place();
+      var sky = C.skyBodies(new Date(), loc.lat, loc.lon);
+      var moon = sky.bodies.filter(function (b) { return b.kind === "moon"; })[0];
+      var measured = null;
+      if (moonBlob && state.imuReady) {
+        measured = lookAlt() + (0.5 - moonBlob.ny) * 68;
+      }
+      renderResult({
+        loc: loc,
+        sky: sky,
+        moon: moon,
+        moonBlob: moonBlob,
+        stars: stars,
+        frames: state.stack.length,
+        measured: measured,
+      });
+    }
+    one();
+  }
+
+  function renderResult(rec) {
+    stopCamera();
+    var html = "";
+    function row(k, v) {
+      html += '<div class="row"><span class="k">' + k + '</span><span class="v">' + v + "</span></div>";
+    }
+    var locNote = rec.loc.source === "gps" ? "GPS" : "באר שבע (ברירת מחדל עד שיש GPS)";
+    row("מיקום להשוואה", locNote + "<br>" + fmtLat(rec.loc.lat) + "<br>" + fmtLon(rec.loc.lon));
+    if (rec.loc.acc) row("דיוק GPS", Math.round(rec.loc.acc) + " מ׳");
+    if (rec.sky.night) row("מצב", "לילה — ירח וכוכבים, לא שמש");
+    if (rec.moon && rec.moon.alt > 0) {
+      row("ירח מחושב", fmt(rec.moon.alt) + "° · כיוון " + fmt(rec.moon.az, 0) + "°");
+    } else {
+      row("ירח", "מתחת לאופק עכשיו");
+    }
+    if (rec.measured != null) {
+      row("הטלפון מדד (ירח)", fmt(rec.measured) + "°");
+      if (rec.moon) row("הפרש", fmt(rec.measured - rec.moon.alt) + "°");
+    }
+    row("תמונות בסדרה", String(rec.frames || 0));
+    row("נקודות בהירות", rec.moonBlob ? "ירח + " + rec.stars.length + " כוכבים" : String(rec.stars.length) + " כוכבים");
+    var names = rec.sky.bodies.filter(function (b) { return b.alt > 8 && b.kind === "star"; }).slice(0, 5).map(function (b) { return b.name; });
+    if (names.length) row("למעלה עכשיו", names.join(" · "));
+    $("resultCard").innerHTML = html;
+    show("result");
+  }
+
+  $("btnGo").addEventListener("click", function () {
+    show("aim");
+    document.body.classList.add("night");
+    $("aimStatus").textContent = "פותח מצלמה ללילה… אשר מצלמה אם קופץ";
+    requestMotion();
+    getGPS().then(function (g) { if (g) state.gps = g; });
+    loopOverlay();
+    startCamera().then(function (cam) {
+      if (cam) $("aimStatus").textContent = "מצלמה פתוחה. כוון לירח. אחר כך «צלם סדרה».";
+      else $("aimStatus").textContent = "אין מצלמה. אפשר עדיין לראות מה בשמיים לפי הזמן.";
     });
   });
 
-  $("btnShoot").addEventListener("click", function () {
-    var blob = detectSun();
-    var hs = altitudeFromImu(blob);
-    if (hs == null) {
-      // still finish with GPS + computed sun; don't invent a number
-      finish(null, state.imuReady ? "לא הצלחתי למדוד גובה — נשארים על GPS" : "אין חיישן תנועה — נשארים על GPS");
-      return;
-    }
-    finish(hs, null);
-  });
-
+  $("btnShoot").addEventListener("click", takeSeries);
   $("btnSkipCam").addEventListener("click", function () {
-    finish(null, "דילגת על המצלמה");
+    var loc = place();
+    var sky = C.skyBodies(new Date(), loc.lat, loc.lon);
+    var moon = sky.bodies.filter(function (b) { return b.kind === "moon"; })[0];
+    renderResult({ loc: loc, sky: sky, moon: moon, moonBlob: null, stars: [], frames: 0, measured: null });
   });
-
   $("btnAgain").addEventListener("click", function () {
     stopCamera();
-    state.shots = [];
-    $("homeStatus").textContent = "";
+    state.stack = [];
     show("home");
   });
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=3").catch(function () {});
+    navigator.serviceWorker.register("sw.js?v=4").catch(function () {});
   }
 })();
