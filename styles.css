@@ -61,3 +61,9 @@ canvas.overlay { position: absolute; inset: 0; pointer-events: none; }
 .stamp { display: inline-block; font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase;
   border: 1px solid var(--accent); color: var(--accent); padding: 4px 8px; border-radius: 8px; margin-bottom: 12px; }
 #work { display: none; }
+
+button.huge { min-height: 88px; font-size: 1.5rem; }
+.reticle { position:absolute; left:50%; top:50%; width:72px; height:72px; margin:-36px 0 0 -36px;
+  border:3px solid rgba(255,255,255,.7); border-radius:50%; pointer-events:none; box-shadow:0 0 0 2px rgba(0,0,0,.35); }
+.reticle.ok { border-color:#3dcc8a; }
+html[lang=he] { }
